@@ -1,0 +1,43 @@
+name: cicd
+
+mgmt:
+  network: cicd_network
+  ipv4-subnet: 172.0.0.0/24
+
+topology:
+  nodes:
+    # leafs
+    leaf1:
+      kind: ceos
+      image: ceos:4.32.2F
+      mgmt-ipv4: 172.0.0.11
+      startup-config: device_configs/configs/leaf1.cfg
+    leaf2:
+      kind: ceos
+      image: ceos:4.32.2F
+      mgmt-ipv4: 172.0.0.12
+      startup-config: device_configs/configs/leaf2.cfg
+    leaf3:
+      kind: ceos
+      image: ceos:4.32.2F
+      mgmt-ipv4: 172.0.0.13
+      startup-config: device_configs/configs/leaf3.cfg
+
+    # spines
+    spine1:
+      kind: ceos
+      image: ceos:4.32.2F
+      startup-config: device_configs/configs/spine1.cfg
+      mgmt-ipv4: 172.0.0.21
+    spine2:
+      kind: ceos
+      image: ceos:4.32.2F
+      startup-config: device_configs/configs/spine2.cfg
+      mgmt-ipv4: 172.0.0.22
+  links:
+    - endpoints: ["spine1:eth1", "leaf1:eth1"]
+    - endpoints: ["spine1:eth2", "leaf2:eth1"]
+    - endpoints: ["spine1:eth3", "leaf3:eth1"]
+    - endpoints: ["spine2:eth1", "leaf1:eth2"]
+    - endpoints: ["spine2:eth2", "leaf2:eth2"]
+    - endpoints: ["spine2:eth3", "leaf3:eth2"]

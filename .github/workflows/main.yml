@@ -1,0 +1,111 @@
+name: Configuration Validation Workflow
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  validation:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+      with:
+        lfs: true
+
+    - name: Set up Python
+      uses: actions/setup-python@v2
+      with:
+        python-version: '3.9'
+
+    - name: Install Batfish
+      run: |
+        pip install setuptools
+        pip install pybatfish
+  
+    - name: Verify Batfish installation
+      run: |
+        pip list | grep pybatfish
+
+    - name: Set up Batfish Docker
+      run: |
+        docker pull batfish/allinone
+        docker run --name batfish -d -p 9997:9997 -p 9996:9996 batfish/allinone
+
+    - name: Run Batfish validation
+      run: |
+        python - <<EOF
+        from pybatfish.client.session import Session
+        from pybatfish.datamodel import *
+        from pybatfish.datamodel.answer import *
+        from pybatfish.datamodel.flow import *
+
+        # Initialize the Batfish service
+        bf = Session(host="localhost")
+        bf.set_network('network_configs')
+
+        # Load the network configurations
+        bf.init_snapshot('device_configs', name='pr_configs', overwrite=True)
+
+        # Run Batfish analyses
+        print("analyzing config for undefined references")
+        # check for undefined references
+        undefined_references = bf.q.undefinedReferences().answer().frame()
+        if not undefined_references.empty:
+            print("Undefined references found:")
+            print(undefined_references)
+            exit(1)
+        print("success! undefined referenced not found")
+        print("analyzing config for unused structures")
+        # check for unused structures
+        unused_structures = bf.q.unusedStructures().answer().frame()
+        if not unused_structures.empty:
+            print("Unused structures found:")
+            print(unused_structures)
+            exit(1)
+        print("success! unused structures not found")
+        # check for bgp session status
+        print("analyzing config for bgp session issues")
+        bgp_session_status = bf.q.bgpSessionStatus().answer().frame()
+        failed_bgp_sessions = bgp_session_status[bgp_session_status['Established_Status'] != 'ESTABLISHED']
+        if not failed_bgp_sessions.empty:
+          print("bgp down sessions found:")
+          print(failed_bgp_sessions)
+          exit(1)
+        print("success! none of the bgp sessions are down")
+        print("all Batfish validations passed successfully!")
+        EOF
+
+    - name: Install ContainerLab
+      run: |
+        bash -c "$(curl -sL https://get.containerlab.dev)"
+    
+    - name: Verify ContainerLab installation
+      run: containerlab version
+
+    - name: Docker import cEOS image
+      run: docker import cEOS-lab-4.32.2F.tar ceos:4.32.2F
+
+    - name: Deploy ContainerLab topology
+      run: |
+        sudo containerlab deploy --topo topology.yml
+
+    - name: Install Suzieq
+      run: |
+        docker run -it -d --network=host -v $(pwd)/suzieq_inventory.yml:/home/suzieq/suzieq_inventory.yml --name suzieq netenglabs/suzieq:0.20.0
+
+    - name: Verify Suzieq Version
+      run: docker exec -i suzieq suzieq-cli version
+
+    - name: Run Suzieq poller
+      run: |
+        docker exec -i suzieq sq-poller -I suzieq_inventory.yml --run-once update
+
+    - name: Run Suzieq assertions
+      run: |
+        docker exec -i suzieq suzieq-cli bgp assert
+        # docker exec -i suzieq suzieq-cli interface assert
+    
+    - name: Destroy ContainerLab topology
+      run: sudo containerlab destroy --topo topology.yml
